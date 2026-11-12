@@ -1,9 +1,9 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { run } from "../src/cli.ts";
-import { addNote, deleteNote, formatList, localDate, NotesError, searchNotes, type Note } from "../src/notes.ts";
+import { addNote, deleteNote, editNote, formatList, localDate, NotesError, searchNotes, type Note } from "../src/notes.ts";
 
 const DAY = "2026-11-06";
 const tmpFile = () => join(mkdtempSync(join(tmpdir(), "notes-")), "notes.json");
@@ -125,5 +125,81 @@ describe("cli search", () => {
     run(["add", "buy", "milk"], file, DAY);
     run(["search", "milk"], file, DAY);
     expect(run(["list"], file, DAY).out).toBe("1. buy milk (2026-11-06)");
+  });
+});
+
+describe("editNote", () => {
+  const base = addNote(addNote(addNote([], "a", "2026-01-01"), "b", "2026-02-02"), "c", "2026-03-03");
+
+  it("changes text and keeps id and created", () => {
+    const out = editNote(base, 2, "new");
+    expect(out[1]).toEqual({ id: 2, text: "new", created: "2026-02-02" });
+  });
+
+  it("leaves other notes untouched and keeps order", () => {
+    const out = editNote(base, 2, "new");
+    expect(out.map((n) => n.id)).toEqual([1, 2, 3]);
+    expect(out[0]).toEqual(base[0]);
+    expect(out[2]).toEqual(base[2]);
+  });
+
+  it("does not mutate the input", () => {
+    const copy = structuredClone(base);
+    const out = editNote(base, 2, "new");
+    expect(out).not.toBe(base);
+    expect(base).toEqual(copy);
+  });
+
+  it("trims the new text", () => {
+    expect(editNote(base, 1, "  hi  ")[0].text).toBe("hi");
+  });
+
+  it("refuses empty text", () => {
+    expect(() => editNote(base, 1, "   ")).toThrow("a note needs some text");
+    expect(() => editNote(base, 1, "")).toThrow(NotesError);
+  });
+
+  it("refuses unknown ids", () => {
+    expect(() => editNote(base, 99, "x")).toThrow("no note with id 99");
+    expect(() => editNote(base, 99, "x")).toThrow(NotesError);
+  });
+});
+
+describe("cli edit", () => {
+  it("edits a note and keeps its date", () => {
+    const file = tmpFile();
+    writeFileSync(
+      file,
+      JSON.stringify([
+        { id: 1, text: "a", created: "2026-01-01" },
+        { id: 2, text: "b", created: "2026-02-02" },
+      ]),
+    );
+    expect(run(["edit", "2", "new", "text"], file, DAY)).toEqual({ code: 0, out: "Edited note 2." });
+    expect(run(["list"], file, DAY).out).toBe("1. a (2026-01-01)\n2. new text (2026-02-02)");
+  });
+
+  it("edits a note created today", () => {
+    const file = tmpFile();
+    run(["add", "a"], file, DAY);
+    run(["add", "b"], file, DAY);
+    run(["edit", "2", "new", "text"], file, DAY);
+    expect(run(["list"], file, DAY).out).toContain("2. new text (2026-11-06)");
+  });
+
+  it("fails with code 1 and leaves the file unchanged", () => {
+    const file = tmpFile();
+    run(["add", "a"], file, DAY);
+    const before = readFileSync(file, "utf8");
+    for (const args of [["edit", "99", "x"], ["edit", "abc", "x"], ["edit", "1"]]) {
+      const res = run(args, file, DAY);
+      expect(res.code).toBe(1);
+      expect(res.out).toMatch(/^error: /);
+      expect(readFileSync(file, "utf8")).toBe(before);
+    }
+  });
+
+  it("lists edit in the usage", () => {
+    expect(run(["fly"], tmpFile(), DAY).out).toContain("notes edit <id> <text>");
   });
 });
