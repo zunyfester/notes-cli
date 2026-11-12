@@ -1,9 +1,9 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { run } from "../src/cli.ts";
-import { addNote, deleteNote, formatList, localDate, NotesError, searchNotes, type Note } from "../src/notes.ts";
+import { addNote, deleteNote, formatList, loadNotes, localDate, NotesError, searchNotes, type Note } from "../src/notes.ts";
 
 const DAY = "2026-11-06";
 const tmpFile = () => join(mkdtempSync(join(tmpdir(), "notes-")), "notes.json");
@@ -125,5 +125,71 @@ describe("cli search", () => {
     run(["add", "buy", "milk"], file, DAY);
     run(["search", "milk"], file, DAY);
     expect(run(["list"], file, DAY).out).toBe("1. buy milk (2026-11-06)");
+  });
+});
+
+const good = { id: 1, text: "a", created: "2026-01-01" };
+const withData = (data: unknown): string => {
+  const file = tmpFile();
+  writeFileSync(file, typeof data === "string" ? data : JSON.stringify(data));
+  return file;
+};
+
+describe("loadNotes validation", () => {
+  it("accepts valid, empty and missing files", () => {
+    expect(loadNotes(withData([good, { ...good, id: 2 }]))).toEqual([good, { ...good, id: 2 }]);
+    expect(loadNotes(withData([]))).toEqual([]);
+    expect(loadNotes(tmpFile())).toEqual([]);
+  });
+
+  it("reports the position of an invalid note", () => {
+    const file = withData([{ id: "x" }]);
+    expect(() => loadNotes(file)).toThrow(new NotesError(`${file} has an invalid note at position 1`));
+    const file3 = withData([good, { ...good, id: 2 }, { id: 3, created: "2026-01-01" }]);
+    expect(() => loadNotes(file3)).toThrow(`${file3} has an invalid note at position 3`);
+  });
+
+  const bad: unknown[] = [
+    { ...good, id: 0 },
+    { ...good, id: -1 },
+    { ...good, id: 1.5 },
+    { ...good, id: "1" },
+    { ...good, text: "" },
+    { ...good, text: "   " },
+    { ...good, text: 5 },
+    { id: 1, text: "a" },
+    { ...good, created: "2026/01/01" },
+    { ...good, created: "26-1-1" },
+    { ...good, created: 20260101 },
+    null,
+    42,
+    [],
+  ];
+  it.each(bad.map((b) => [JSON.stringify(b), b]))("rejects %s", (_name, b) => {
+    const file = withData([b]);
+    expect(() => loadNotes(file)).toThrow(NotesError);
+  });
+
+  it("reports the first of several invalid notes", () => {
+    const file = withData([good, null, 7]);
+    expect(() => loadNotes(file)).toThrow(`${file} has an invalid note at position 2`);
+  });
+
+  it("keeps JSON and non-list errors", () => {
+    expect(() => loadNotes(withData("{nope"))).toThrow(SyntaxError);
+    expect(() => loadNotes(withData({}))).toThrow(NotesError);
+  });
+});
+
+describe("cli with a broken file", () => {
+  it.each([["list"], ["add", "x"]])("%s fails and leaves the file untouched", (...args) => {
+    const file = withData([good, { id: 0 }]);
+    const before = readFileSync(file, "utf8");
+    expect(run(args.flat(), file, DAY)).toEqual({ code: 1, out: `error: ${file} has an invalid note at position 2` });
+    expect(readFileSync(file, "utf8")).toBe(before);
+  });
+
+  it("invalid JSON still gives code 1", () => {
+    expect(run(["list"], withData("{nope"), DAY).code).toBe(1);
   });
 });

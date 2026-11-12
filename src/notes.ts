@@ -13,7 +13,23 @@ export function loadNotes(file: string): Note[] {
   if (!existsSync(file)) return [];
   const data: unknown = JSON.parse(readFileSync(file, "utf8"));
   if (!Array.isArray(data)) throw new NotesError(`${file} does not hold a list of notes`);
+  const bad = data.findIndex((x) => !isNote(x));
+  if (bad !== -1) throw new NotesError(`${file} has an invalid note at position ${bad + 1}`);
   return data as Note[];
+}
+
+function isNote(x: unknown): x is Note {
+  if (typeof x !== "object" || x === null || Array.isArray(x)) return false;
+  const n = x as Record<string, unknown>;
+  return (
+    typeof n.id === "number" &&
+    Number.isInteger(n.id) &&
+    n.id > 0 &&
+    typeof n.text === "string" &&
+    n.text.trim() !== "" &&
+    typeof n.created === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(n.created)
+  );
 }
 
 export function saveNotes(file: string, notes: Note[]): void {
