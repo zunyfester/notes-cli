@@ -1,9 +1,9 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { run } from "../src/cli.ts";
-import { addNote, deleteNote, formatList, localDate, NotesError, searchNotes, type Note } from "../src/notes.ts";
+import { addNote, deleteNote, formatList, formatListColor, localDate, NotesError, searchNotes, type Note } from "../src/notes.ts";
 
 const DAY = "2026-11-06";
 const tmpFile = () => join(mkdtempSync(join(tmpdir(), "notes-")), "notes.json");
@@ -125,5 +125,64 @@ describe("cli search", () => {
     run(["add", "buy", "milk"], file, DAY);
     run(["search", "milk"], file, DAY);
     expect(run(["list"], file, DAY).out).toBe("1. buy milk (2026-11-06)");
+  });
+});
+
+describe("formatListColor", () => {
+  const G = "\x1b[90m";
+  const GR = "\x1b[32m";
+  const R = "\x1b[0m";
+
+  it("colors the id gray and the text green", () => {
+    const notes: Note[] = [{ id: 1, text: "hi", created: "2026-01-02" }];
+    expect(formatListColor(notes)).toBe(`${G}1${R}. ${GR}hi${R} (2026-01-02)`);
+  });
+
+  it("joins several notes with newlines", () => {
+    const notes = addNote(addNote([], "a", DAY), "b", DAY);
+    expect(formatListColor(notes)).toBe(
+      `${G}1${R}. ${GR}a${R} (${DAY})\n${G}2${R}. ${GR}b${R} (${DAY})`,
+    );
+  });
+
+  it("leaves the empty message plain", () => {
+    expect(formatListColor([])).toBe("No notes yet.");
+  });
+
+  it("does not mutate its input", () => {
+    const notes = addNote([], "a", DAY);
+    const copy = structuredClone(notes);
+    formatListColor(notes);
+    expect(notes).toEqual(copy);
+  });
+});
+
+describe("cli list color", () => {
+  const colored = `\x1b[90m1\x1b[0m. \x1b[32mbuy milk\x1b[0m (${DAY})`;
+
+  it("colors list when asked", () => {
+    const file = tmpFile();
+    run(["add", "buy", "milk"], file, DAY);
+    expect(run(["list"], file, DAY, true)).toEqual({ code: 0, out: colored });
+  });
+
+  it("stays plain by default", () => {
+    const file = tmpFile();
+    run(["add", "buy", "milk"], file, DAY);
+    expect(run(["list"], file, DAY).out).toBe(`1. buy milk (${DAY})`);
+  });
+
+  it("does not color search", () => {
+    const file = tmpFile();
+    run(["add", "x"], file, DAY);
+    expect(run(["search", "x"], file, DAY, true).out).toBe(`1. x (${DAY})`);
+  });
+
+  it("does not write the file when listing in color", () => {
+    const file = tmpFile();
+    run(["add", "x"], file, DAY);
+    const before = readFileSync(file, "utf8");
+    run(["list"], file, DAY, true);
+    expect(readFileSync(file, "utf8")).toBe(before);
   });
 });
