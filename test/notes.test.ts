@@ -1,9 +1,9 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { run } from "../src/cli.ts";
-import { addNote, deleteNote, formatList, localDate, NotesError, searchNotes, type Note } from "../src/notes.ts";
+import { addNote, deleteNote, formatList, localDate, NotesError, notesSince, searchNotes, type Note } from "../src/notes.ts";
 
 const DAY = "2026-11-06";
 const tmpFile = () => join(mkdtempSync(join(tmpdir(), "notes-")), "notes.json");
@@ -125,5 +125,84 @@ describe("cli search", () => {
     run(["add", "buy", "milk"], file, DAY);
     run(["search", "milk"], file, DAY);
     expect(run(["list"], file, DAY).out).toBe("1. buy milk (2026-11-06)");
+  });
+});
+
+describe("notesSince", () => {
+  const list: Note[] = [
+    { id: 1, text: "a", created: "2026-10-31" },
+    { id: 2, text: "b", created: "2026-11-01" },
+    { id: 3, text: "c", created: "2026-11-05" },
+  ];
+
+  it("keeps notes created on or after the date, in order, with ids", () => {
+    expect(notesSince(list, "2026-11-01").map((n) => n.id)).toEqual([2, 3]);
+  });
+
+  it("returns a new array and does not mutate", () => {
+    const copy = structuredClone(list);
+    const out = notesSince(list, "2026-01-01");
+    expect(out).not.toBe(list);
+    expect(list).toEqual(copy);
+  });
+
+  it("returns [] when nothing matches", () => {
+    expect(notesSince(list, "2027-01-01")).toEqual([]);
+  });
+
+  it.each(["2026-13-01", "ayer", "2026-1-5", "", "2026-02-30"])("rejects %j", (bad) => {
+    expect(() => notesSince(list, bad)).toThrow(NotesError);
+    expect(() => notesSince(list, bad)).toThrow("--since needs a date like YYYY-MM-DD");
+  });
+});
+
+describe("cli list --since", () => {
+  const seed = (file: string) => {
+    writeFileSync(
+      file,
+      JSON.stringify([
+        { id: 1, text: "old", created: "2026-10-01" },
+        { id: 2, text: "new", created: "2026-11-02" },
+      ]),
+    );
+  };
+  const ERR = "error: --since needs a date like YYYY-MM-DD";
+
+  it("prints only matching notes", () => {
+    const file = tmpFile();
+    seed(file);
+    expect(run(["list", "--since", "2026-11-01"], file, DAY)).toEqual({ code: 0, out: "2. new (2026-11-02)" });
+  });
+
+  it("reports no matches with code 0", () => {
+    const file = tmpFile();
+    seed(file);
+    expect(run(["list", "--since", "2027-01-01"], file, DAY)).toEqual({ code: 0, out: "No matching notes." });
+  });
+
+  it("errors without a date", () => {
+    expect(run(["list", "--since"], tmpFile(), DAY)).toEqual({ code: 1, out: ERR });
+  });
+
+  it.each(["2026-13-01", "ayer", "2026-1-5"])("errors on malformed date %s", (bad) => {
+    expect(run(["list", "--since", bad], tmpFile(), DAY)).toEqual({ code: 1, out: ERR });
+  });
+
+  it("plain list is unchanged", () => {
+    const file = tmpFile();
+    seed(file);
+    expect(run(["list"], file, DAY).out).toBe("1. old (2026-10-01)\n2. new (2026-11-02)");
+    expect(run(["list"], tmpFile(), DAY).out).toBe("No notes yet.");
+  });
+
+  it("does not write the file", () => {
+    const file = tmpFile();
+    seed(file);
+    const before = readFileSync(file, "utf8");
+    run(["list", "--since", "2026-11-01"], file, DAY);
+    expect(readFileSync(file, "utf8")).toBe(before);
+    const missing = tmpFile();
+    run(["list", "--since", "2026-11-01"], missing, DAY);
+    expect(existsSync(missing)).toBe(false);
   });
 });
