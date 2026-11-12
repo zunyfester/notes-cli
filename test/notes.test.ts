@@ -1,9 +1,9 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { run } from "../src/cli.ts";
-import { addNote, deleteNote, formatList, localDate, NotesError, searchNotes, type Note } from "../src/notes.ts";
+import { addNote, deleteNote, formatList, localDate, NotesError, renderHtml, searchNotes, type Note } from "../src/notes.ts";
 
 const DAY = "2026-11-06";
 const tmpFile = () => join(mkdtempSync(join(tmpdir(), "notes-")), "notes.json");
@@ -125,5 +125,108 @@ describe("cli search", () => {
     run(["add", "buy", "milk"], file, DAY);
     run(["search", "milk"], file, DAY);
     expect(run(["list"], file, DAY).out).toBe("1. buy milk (2026-11-06)");
+  });
+});
+
+describe("renderHtml", () => {
+  const T = "2026-11-21";
+  const mk = (id: number, text: string, created: string): Note => ({ id, text, created });
+  const pos = (s: string, x: string) => s.indexOf(x);
+
+  it("has the document shell", () => {
+    const out = renderHtml([], T);
+    for (const s of ["<!doctype html>", '<meta charset="utf-8">', '<meta name="viewport"', "<title>Notes</title>", "Add a note", "notes add &lt;your note&gt;", "Your notes"]) {
+      expect(out).toContain(s);
+    }
+  });
+
+  it("handles an empty list", () => {
+    const out = renderHtml([], T);
+    expect(out).toContain("No notes yet.");
+    expect(out).toContain(">0<");
+    for (const g of ["Today", "This week", "Earlier"]) expect(out).not.toContain(`>${g}<`);
+  });
+
+  it("groups notes in order and omits empty groups", () => {
+    const notes = [mk(1, "n-today", T), mk(2, "n-3", "2026-11-18"), mk(3, "n-6", "2026-11-15"), mk(4, "n-7", "2026-11-14"), mk(5, "n-30", "2026-10-22")];
+    const out = renderHtml(notes, T);
+    const [a, b, c] = [pos(out, ">Today<"), pos(out, ">This week<"), pos(out, ">Earlier<")];
+    expect(a).toBeGreaterThan(-1);
+    expect(a).toBeLessThan(b);
+    expect(b).toBeLessThan(c);
+    expect(pos(out, "n-today")).toBeLessThan(b);
+    expect(pos(out, "n-3")).toBeGreaterThan(b);
+    expect(pos(out, "n-6")).toBeLessThan(c);
+    expect(pos(out, "n-7")).toBeGreaterThan(c);
+    expect(pos(out, "n-30")).toBeGreaterThan(c);
+    const only = renderHtml([mk(1, "x", T)], T);
+    expect(only).not.toContain(">This week<");
+    expect(only).not.toContain(">Earlier<");
+  });
+
+  it("sorts newer first, then higher id first", () => {
+    const out = renderHtml([mk(1, "old", "2026-11-18"), mk(2, "tieA", "2026-11-19"), mk(3, "tieB", "2026-11-19")], T);
+    expect(pos(out, "tieB")).toBeLessThan(pos(out, "tieA"));
+    expect(pos(out, "tieA")).toBeLessThan(pos(out, "old"));
+  });
+
+  it("shows the total count in the badge", () => {
+    expect(renderHtml([mk(1, "a", T), mk(2, "b", "2026-01-01")], T)).toContain(">2<");
+  });
+
+  it("formats date lines", () => {
+    expect(renderHtml([mk(1, "a", T)], T)).toContain(">Today<");
+    expect(renderHtml([mk(1, "a", "2026-11-20")], T)).toContain("Fri 20 Nov · 1 day ago");
+    expect(renderHtml([mk(1, "a", "2026-11-18")], T)).toContain("Wed 18 Nov · 3 days ago");
+    expect(renderHtml([mk(1, "a", "2025-12-30")], "2026-01-02")).toContain("Tue 30 Dec · 3 days ago");
+  });
+
+  it("escapes note text", () => {
+    const out = renderHtml([mk(1, `<script>alert("x")</script> & 'q'`, T)], T);
+    expect(out).toContain("&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt; &amp; &#39;q&#39;");
+    expect(out).not.toContain("<script");
+  });
+
+  it("is self-contained", () => {
+    const out = renderHtml([mk(1, "a", T)], T);
+    for (const s of ["<script", "<link", "http://", "https://"]) expect(out).not.toContain(s);
+    for (const s of ["prefers-color-scheme: dark", "#f5f6fa", "#ddd4ee", "#1b2236", "border-radius: 28px"]) expect(out).toContain(s);
+  });
+
+  it("is pure", () => {
+    const notes = [mk(2, "b", T), mk(1, "a", "2026-11-01")];
+    const copy = structuredClone(notes);
+    const out = renderHtml(notes, T);
+    expect(notes).toEqual(copy);
+    expect(renderHtml(notes, T)).toBe(out);
+  });
+});
+
+describe("cli html", () => {
+  it("prints a page relative to the given day", () => {
+    const file = tmpFile();
+    run(["add", "buy", "milk"], file, "2026-11-05");
+    const res = run(["html"], file, DAY);
+    expect(res.code).toBe(0);
+    expect(res.out.startsWith("<!doctype html>")).toBe(true);
+    expect(res.out).toContain("buy milk");
+    expect(res.out).toContain("Thu 5 Nov · 1 day ago");
+  });
+
+  it("does not create or modify the file", () => {
+    const missing = tmpFile();
+    expect(run(["html"], missing, DAY).code).toBe(0);
+    expect(existsSync(missing)).toBe(false);
+    const file = tmpFile();
+    run(["add", "x"], file, DAY);
+    const before = readFileSync(file);
+    run(["html"], file, DAY);
+    expect(readFileSync(file).equals(before)).toBe(true);
+  });
+
+  it("mentions html in usage", () => {
+    const res = run(["fly"], tmpFile(), DAY);
+    expect(res.code).toBe(2);
+    expect(res.out).toContain("notes html");
   });
 });
