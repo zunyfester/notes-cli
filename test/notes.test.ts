@@ -1,9 +1,19 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { run } from "../src/cli.ts";
-import { addNote, deleteNote, formatList, localDate, NotesError, searchNotes, type Note } from "../src/notes.ts";
+import {
+  addNote,
+  deleteNote,
+  filterByTag,
+  formatList,
+  localDate,
+  NotesError,
+  parseTags,
+  searchNotes,
+  type Note,
+} from "../src/notes.ts";
 
 const DAY = "2026-11-06";
 const tmpFile = () => join(mkdtempSync(join(tmpdir(), "notes-")), "notes.json");
@@ -91,6 +101,82 @@ describe("searchNotes", () => {
   it("refuses an empty or whitespace-only query", () => {
     expect(() => searchNotes(base, "")).toThrow(NotesError);
     expect(() => searchNotes(base, "   ")).toThrow(NotesError);
+  });
+});
+
+describe("parseTags", () => {
+  it("collects tags and keeps the remaining words", () => {
+    expect(parseTags(["--tag", "a", "hello", "world"])).toEqual({ tags: ["a"], rest: ["hello", "world"] });
+    expect(parseTags(["--tag", "a", "hi", "--tag", "b"])).toEqual({ tags: ["a", "b"], rest: ["hi"] });
+    expect(parseTags(["hi", "--tag", "a"])).toEqual({ tags: ["a"], rest: ["hi"] });
+  });
+
+  it("normalizes and dedupes", () => {
+    expect(parseTags(["--tag", " Work ", "--tag", "work", "--tag", "B"]).tags).toEqual(["work", "b"]);
+  });
+
+  it("refuses a missing or empty value", () => {
+    expect(() => parseTags(["hi", "--tag"])).toThrow("--tag needs a value");
+    expect(() => parseTags(["--tag", "  ", "hi"])).toThrow(NotesError);
+  });
+});
+
+describe("tags in notes", () => {
+  it("stores tags only when given, without mutating", () => {
+    const base: Note[] = addNote([], "a", DAY);
+    const next = addNote(base, "b", DAY, ["x", "y"]);
+    expect(next[1]).toEqual({ id: 2, text: "b", created: DAY, tags: ["x", "y"] });
+    expect(base).toHaveLength(1);
+    expect("tags" in addNote([], "c", DAY)[0]).toBe(false);
+  });
+
+  it("filters by tag, ignoring case and legacy notes", () => {
+    const notes = addNote(addNote(addNote([], "a", DAY, ["work"]), "b", DAY), "c", DAY, ["home"]);
+    const copy = structuredClone(notes);
+    expect(filterByTag(notes, "WORK").map((n) => n.id)).toEqual([1]);
+    expect(filterByTag(notes, "nope")).toEqual([]);
+    expect(notes).toEqual(copy);
+  });
+
+  it("shows tags in the list", () => {
+    expect(formatList(addNote([], "milk", DAY, ["a", "b"]))).toBe("1. milk (2026-11-06) [a, b]");
+  });
+});
+
+describe("cli tags", () => {
+  it("adds a tagged note", () => {
+    const file = tmpFile();
+    expect(run(["add", "--tag", "work", "--tag", "urgent", "buy", "milk"], file, DAY)).toEqual({
+      code: 0,
+      out: "Added note 1.",
+    });
+    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual([
+      { id: 1, text: "buy milk", created: DAY, tags: ["work", "urgent"] },
+    ]);
+  });
+
+  it("errors on --tag without a value and writes nothing", () => {
+    const file = tmpFile();
+    expect(run(["add", "hi", "--tag"], file, DAY)).toEqual({ code: 1, out: "error: --tag needs a value" });
+    expect(existsSync(file)).toBe(false);
+  });
+
+  it("lists only notes with the tag, read-only", () => {
+    const file = tmpFile();
+    run(["add", "--tag", "work", "a"], file, DAY);
+    run(["add", "b"], file, DAY);
+    run(["add", "--tag", "home", "c"], file, DAY);
+    const before = readFileSync(file, "utf8");
+    expect(run(["list", "--tag", "work"], file, DAY)).toEqual({ code: 0, out: "1. a (2026-11-06) [work]" });
+    expect(run(["list", "--tag", "nope"], file, DAY)).toEqual({ code: 0, out: "No matching notes." });
+    expect(readFileSync(file, "utf8")).toBe(before);
+  });
+
+  it("works with legacy files without tags", () => {
+    const file = tmpFile();
+    writeFileSync(file, JSON.stringify([{ id: 1, text: "old", created: DAY }]));
+    expect(run(["list"], file, DAY).out).toBe("1. old (2026-11-06)");
+    expect(run(["list", "--tag", "x"], file, DAY).out).toBe("No matching notes.");
   });
 });
 

@@ -1,23 +1,41 @@
-// notes add <text> | notes list | notes search <text> | notes delete <id>. Run with: node src/cli.ts <command>
-import { addNote, deleteNote, formatList, loadNotes, localDate, NotesError, saveNotes, searchNotes } from "./notes.ts";
+// notes add [--tag <t>]... <text> | notes list [--tag <t>] | notes search <text> | notes delete <id>. Run with: node src/cli.ts <command>
+import {
+  addNote,
+  deleteNote,
+  filterByTag,
+  formatList,
+  loadNotes,
+  localDate,
+  NotesError,
+  parseTags,
+  saveNotes,
+  searchNotes,
+} from "./notes.ts";
 
 export interface Result {
   code: number;
   out: string;
 }
 
-const USAGE = "usage: notes add <text> | notes list | notes search <text> | notes delete <id>";
+const USAGE = "usage: notes add [--tag <t>]... <text> | notes list [--tag <t>] | notes search <text> | notes delete <id>";
 
 export function run(argv: string[], file: string, today: string): Result {
   const [command, ...rest] = argv;
   try {
     const notes = loadNotes(file);
     if (command === "add") {
-      const next = addNote(notes, rest.join(" "), today);
+      const parsed = parseTags(rest);
+      const next = addNote(notes, parsed.rest.join(" "), today, parsed.tags);
       saveNotes(file, next);
       return { code: 0, out: `Added note ${next[next.length - 1].id}.` };
     }
-    if (command === "list") return { code: 0, out: formatList(notes) };
+    if (command === "list") {
+      const { tags } = parseTags(rest);
+      if (tags.length === 0) return { code: 0, out: formatList(notes) };
+      if (tags.length > 1) throw new NotesError("list takes only one --tag");
+      const found = filterByTag(notes, tags[0]);
+      return { code: 0, out: found.length === 0 ? "No matching notes." : formatList(found) };
+    }
     if (command === "search") {
       const found = searchNotes(notes, rest.join(" "));
       return { code: 0, out: found.length === 0 ? "No matching notes." : formatList(found) };
