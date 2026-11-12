@@ -1,9 +1,9 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { run } from "../src/cli.ts";
-import { addNote, deleteNote, formatList, localDate, NotesError, searchNotes, type Note } from "../src/notes.ts";
+import { addNote, deleteNote, formatList, localDate, NotesError, parseNoteId, searchNotes, type Note } from "../src/notes.ts";
 
 const DAY = "2026-11-06";
 const tmpFile = () => join(mkdtempSync(join(tmpdir(), "notes-")), "notes.json");
@@ -125,5 +125,55 @@ describe("cli search", () => {
     run(["add", "buy", "milk"], file, DAY);
     run(["search", "milk"], file, DAY);
     expect(run(["list"], file, DAY).out).toBe("1. buy milk (2026-11-06)");
+  });
+});
+
+describe("parseNoteId", () => {
+  it("parses positive integers", () => {
+    expect(parseNoteId("1")).toBe(1);
+    expect(parseNoteId("42")).toBe(42);
+  });
+
+  it("rejects a missing id", () => {
+    expect(() => parseNoteId(undefined)).toThrow(new NotesError("delete needs a note id"));
+  });
+
+  it.each(["abc", "1.5", "0", "-2", ""])("rejects %j", (raw) => {
+    expect(() => parseNoteId(raw)).toThrow(new NotesError(`"${raw}" is not a valid note id`));
+  });
+});
+
+describe("cli delete validation", () => {
+  const seeded = () => {
+    const file = tmpFile();
+    run(["add", "x"], file, DAY);
+    return file;
+  };
+
+  it("rejects a missing id and leaves the file alone", () => {
+    const file = seeded();
+    const before = readFileSync(file, "utf8");
+    expect(run(["delete"], file, DAY)).toEqual({ code: 1, out: "error: delete needs a note id" });
+    expect(readFileSync(file, "utf8")).toBe(before);
+  });
+
+  it.each(["abc", "1.5", "0", "-2"])("rejects %j and leaves the file alone", (v) => {
+    const file = seeded();
+    const before = readFileSync(file, "utf8");
+    expect(run(["delete", v], file, DAY)).toEqual({ code: 1, out: `error: "${v}" is not a valid note id` });
+    expect(readFileSync(file, "utf8")).toBe(before);
+  });
+
+  it("reports an unknown id and leaves the file alone", () => {
+    const file = seeded();
+    const before = readFileSync(file, "utf8");
+    expect(run(["delete", "7"], file, DAY)).toEqual({ code: 1, out: "error: no note with id 7" });
+    expect(readFileSync(file, "utf8")).toBe(before);
+  });
+
+  it("deletes a valid id", () => {
+    const file = seeded();
+    expect(run(["delete", "1"], file, DAY)).toEqual({ code: 0, out: "Deleted note 1." });
+    expect(run(["list"], file, DAY).out).toBe("No notes yet.");
   });
 });

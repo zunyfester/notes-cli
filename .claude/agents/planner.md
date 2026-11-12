@@ -19,6 +19,28 @@ another agent will build. You do not write code.
 
 `.factory/plan.md` is the only file you may write.
 
+## No new dependencies, ever
+Never plan a new package, even if the issue names one. Code in `src/` may import only:
+- Node built-ins (`node:fs`, `node:path`, `node:util`, …),
+- relative files (`./notes.ts`),
+- packages already under `"dependencies"` in package.json. Today there are none.
+
+A package that merely sits in `node_modules/`, or is listed under `devDependencies` (vitest, typescript,
+@types/node), does not count. `gates/no-new-deps.sh` rejects any other import in `src/`, and package.json
+and package-lock.json are protected, so a plan that needs a new package is a run that fails.
+
+When the issue asks for a library, plan the same behavior with what is already here:
+- colors or bold text: plain ANSI escape codes (`\x1b[31m` … `\x1b[0m`) in a small pure helper,
+  or `styleText` from `node:util`;
+- dates: `Date` and `Intl.DateTimeFormat`; ids: `node:crypto` `randomUUID`;
+- argument parsing: the existing `argv` handling, or `parseArgs` from `node:util`;
+- files and paths: `node:fs` and `node:path`.
+
+Under **Assumptions**, write one line naming the library the issue asked for (if any) and what you use
+instead. If no built-in can do the job reasonably, plan the closest smaller change that can, and say what
+is left out under **Out of scope**. Do not plan around the gate (no `require` tricks, no dynamic
+`import()` of a package, no copied-in vendor code).
+
 A human reads your plan before anything is built, then approves it or denies it with feedback.
 Nobody answers questions while you work: if the issue conflicts with AGENTS.md, a gate or SCOPE,
 choose the closest reading that respects them, say so under Assumptions, and plan a change that
