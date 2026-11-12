@@ -1,5 +1,5 @@
 // notes add <text> | notes list | notes delete <id>. Run with: node src/cli.ts <command>
-import { addNote, deleteNote, formatList, loadNotes, NotesError, saveNotes } from "./notes.ts";
+import { addNote, deleteNote, formatList, loadNotes, localDate, NotesError, saveNotes } from "./notes.ts";
 
 export interface Result {
   code: number;
@@ -30,7 +30,7 @@ export function run(argv: string[], file: string, today: string): Result {
 }
 
 if (import.meta.main) {
-  const result = run(process.argv.slice(2), process.env.NOTES_FILE ?? "notes.json", new Date().toISOString().slice(0, 10));
+  const result = run(process.argv.slice(2), process.env.NOTES_FILE ?? "notes.json", localDate(new Date()));
   console.log(result.out);
   process.exitCode = result.code;
 }

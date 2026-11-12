@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { run } from "../src/cli.ts";
-import { addNote, deleteNote, formatList, NotesError, type Note } from "../src/notes.ts";
+import { addNote, deleteNote, formatList, localDate, NotesError, type Note } from "../src/notes.ts";
 
 const DAY = "2026-11-06";
 const tmpFile = () => join(mkdtempSync(join(tmpdir(), "notes-")), "notes.json");
@@ -28,6 +28,21 @@ describe("notes", () => {
   it("formats a list", () => {
     expect(formatList([])).toBe("No notes yet.");
     expect(formatList(addNote([], "milk", DAY))).toBe("1. milk (2026-11-06)");
+  });
+});
+
+describe("localDate", () => {
+  it("uses the local calendar day, not the UTC one", () => {
+    const tz = process.env.TZ;
+    process.env.TZ = "America/Bogota";
+    try {
+      // 23:30 local on 11 Nov 2026 is already 12 Nov in UTC.
+      expect(localDate(new Date("2026-11-12T04:30:00Z"))).toBe("2026-11-11");
+      expect(localDate(new Date("2026-01-05T15:00:00Z"))).toBe("2026-01-05");
+    } finally {
+      if (tz === undefined) delete process.env.TZ;
+      else process.env.TZ = tz;
+    }
   });
 });
 

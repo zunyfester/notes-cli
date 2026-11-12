@@ -20,6 +20,11 @@ export function saveNotes(file: string, notes: Note[]): void {
   writeFileSync(file, JSON.stringify(notes, null, 2) + "\n");
 }
 
+export function localDate(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 export function addNote(notes: Note[], text: string, today: string): Note[] {
   const clean = text.trim();
   if (!clean) throw new NotesError("a note needs some text");
