@@ -5,6 +5,7 @@ export interface Note {
   id: number;
   text: string;
   created: string; // ISO date, YYYY-MM-DD
+  tags?: string[];
 }
 
 export class NotesError extends Error {}
@@ -25,11 +26,34 @@ export function localDate(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-export function addNote(notes: Note[], text: string, today: string): Note[] {
+export function parseTagArgs(args: string[]): { tags: string[]; rest: string[] } {
+  const tags: string[] = [];
+  const rest: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] !== "--tag") {
+      rest.push(args[i]);
+      continue;
+    }
+    const tag = (args[++i] ?? "").trim().toLowerCase();
+    if (!tag) throw new NotesError("--tag needs a value");
+    tags.push(tag);
+  }
+  return { tags, rest };
+}
+
+export function addNote(notes: Note[], text: string, today: string, tags: string[] = []): Note[] {
   const clean = text.trim();
   if (!clean) throw new NotesError("a note needs some text");
   const id = notes.reduce((max, n) => Math.max(max, n.id), 0) + 1;
-  return [...notes, { id, text: clean, created: today }];
+  const unique = [...new Set(tags.map((t) => t.trim().toLowerCase()).filter((t) => t))];
+  const note: Note = { id, text: clean, created: today };
+  if (unique.length > 0) note.tags = unique;
+  return [...notes, note];
+}
+
+export function filterByTag(notes: Note[], tag: string): Note[] {
+  const needle = tag.trim().toLowerCase();
+  return notes.filter((n) => (n.tags ?? []).includes(needle));
 }
 
 export function deleteNote(notes: Note[], id: number): Note[] {
@@ -45,5 +69,6 @@ export function searchNotes(notes: Note[], query: string): Note[] {
 
 export function formatList(notes: Note[]): string {
   if (notes.length === 0) return "No notes yet.";
-  return notes.map((n) => `${n.id}. ${n.text} (${n.created})`).join("\n");
+  const suffix = (n: Note) => (n.tags && n.tags.length > 0 ? ` [${n.tags.join(", ")}]` : "");
+  return notes.map((n) => `${n.id}. ${n.text} (${n.created})${suffix(n)}`).join("\n");
 }
