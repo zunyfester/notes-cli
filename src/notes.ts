@@ -32,6 +32,13 @@ export function addNote(notes: Note[], text: string, today: string): Note[] {
   return [...notes, { id, text: clean, created: today }];
 }
 
+export function parseNoteId(raw: string | undefined): number {
+  if (raw === undefined) throw new NotesError("delete needs a note id");
+  const id = Number(raw);
+  if (!/^[1-9]\d*$/.test(raw) || !Number.isSafeInteger(id)) throw new NotesError(`"${raw}" is not a valid note id`);
+  return id;
+}
+
 export function deleteNote(notes: Note[], id: number): Note[] {
   if (!notes.some((n) => n.id === id)) throw new NotesError(`no note with id ${id}`);
   return notes.filter((n) => n.id !== id);
