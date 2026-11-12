@@ -1,9 +1,9 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { run } from "../src/cli.ts";
-import { addNote, deleteNote, formatList, localDate, NotesError, searchNotes, type Note } from "../src/notes.ts";
+import { addNote, deleteNote, formatList, localDate, NotesError, renderHtml, searchNotes, type Note } from "../src/notes.ts";
 
 const DAY = "2026-11-06";
 const tmpFile = () => join(mkdtempSync(join(tmpdir(), "notes-")), "notes.json");
@@ -125,5 +125,129 @@ describe("cli search", () => {
     run(["add", "buy", "milk"], file, DAY);
     run(["search", "milk"], file, DAY);
     expect(run(["list"], file, DAY).out).toBe("1. buy milk (2026-11-06)");
+  });
+});
+
+describe("renderHtml", () => {
+  const today = "2026-11-24";
+  const mk = (id: number, text: string, created: string): Note => ({ id, text, created });
+  const sample = [
+    mk(1, "oldie", "2026-11-17"),
+    mk(2, "week6", "2026-11-18"),
+    mk(3, "yesterday", "2026-11-23"),
+    mk(4, "nowish", "2026-11-24"),
+    mk(5, "future", "2026-11-30"),
+  ];
+  const count = (s: string, sub: string) => s.split(sub).length - 1;
+
+  it("is a full document", () => {
+    const out = renderHtml([], today);
+    expect(out.startsWith("<!doctype html>")).toBe(true);
+    expect(out).toContain('<meta charset="utf-8">');
+    expect(out).toContain('<meta name="viewport" content="width=device-width, initial-scale=1">');
+    expect(out).toContain("<title>Notes</title>");
+  });
+
+  it("has the exact CSS and the static card", () => {
+    const out = renderHtml([], today);
+    expect(out).toContain(".card { background: #ffffff;");
+    expect(out).toContain(".panel { background: #ddd4ee;");
+    expect(out).toContain(".dot { flex: none; width: 40px; height: 40px; border-radius: 50%; background: #ffffff; }");
+    expect(out).toContain(".plus {");
+    expect(out).toContain("background: #1b2236;");
+    expect(out).toContain("<h2>Add a note</h2>");
+    expect(out).toContain('<div class="input">notes add &lt;your note&gt;</div>');
+  });
+
+  it("renders one note block per note", () => {
+    const out = renderHtml(sample, today);
+    expect(count(out, '<div class="note"><span class="dot"></span>')).toBe(5);
+    expect(count(out, 'class="note"')).toBe(5);
+  });
+
+  it("groups by age in order", () => {
+    const out = renderHtml(sample, today);
+    const t = out.indexOf('<div class="group">Today</div>');
+    const w = out.indexOf('<div class="group">This week</div>');
+    const e = out.indexOf('<div class="group">Earlier</div>');
+    expect(t).toBeGreaterThan(-1);
+    expect(w).toBeGreaterThan(t);
+    expect(e).toBeGreaterThan(w);
+    expect(out.indexOf(">future<")).toBeLessThan(w);
+    expect(out.indexOf(">nowish<")).toBeLessThan(w);
+    expect(out.indexOf(">yesterday<")).toBeGreaterThan(w);
+    expect(out.indexOf(">week6<")).toBeGreaterThan(w);
+    expect(out.indexOf(">week6<")).toBeLessThan(e);
+    expect(out.indexOf(">oldie<")).toBeGreaterThan(e);
+  });
+
+  it("omits empty groups", () => {
+    const out = renderHtml([mk(1, "old", "2026-01-01")], today);
+    expect(out).not.toContain('<div class="group">Today</div>');
+    expect(out).not.toContain('<div class="group">This week</div>');
+    expect(out).toContain('<div class="group">Earlier</div>');
+  });
+
+  it("sorts newest first, higher id first on ties, without mutating", () => {
+    const input = [mk(1, "aaa", "2026-11-20"), mk(2, "bbb", "2026-11-22"), mk(3, "ccc", "2026-11-20")];
+    const copy = structuredClone(input);
+    const out = renderHtml(input, today);
+    expect(out.indexOf(">bbb<")).toBeLessThan(out.indexOf(">ccc<"));
+    expect(out.indexOf(">ccc<")).toBeLessThan(out.indexOf(">aaa<"));
+    expect(input).toEqual(copy);
+  });
+
+  it("writes the date line", () => {
+    const out = renderHtml([mk(1, "a", "2026-11-24"), mk(2, "b", "2026-11-23"), mk(3, "c", "2026-11-21")], today);
+    expect(out).toContain('<span class="date">Today</span>');
+    expect(out).toContain('<span class="date">Mon 23 Nov · 1 day ago</span>');
+    expect(out).toContain('<span class="date">Sat 21 Nov · 3 days ago</span>');
+  });
+
+  it("shows the badge count", () => {
+    expect(renderHtml(sample.slice(0, 3), today)).toContain('<span class="badge">3</span>');
+  });
+
+  it("handles no notes", () => {
+    const out = renderHtml([], today);
+    expect(out).toContain('<p class="empty">No notes yet.</p>');
+    expect(out).toContain('<span class="badge">0</span>');
+    expect(out).not.toContain('class="note"');
+    expect(out).not.toContain('class="group"');
+  });
+
+  it("escapes text and stays self-contained", () => {
+    const evil = mk(2, "<script>x</script> <link", today);
+    const out = renderHtml([mk(1, "<b>&\"'", today), evil], today);
+    expect(out).toContain("&lt;b&gt;&amp;&quot;&#39;");
+    expect(out).not.toContain("<b>");
+    for (const bad of ["<script", "<link", "http://", "https://"]) expect(out).not.toContain(bad);
+  });
+});
+
+describe("cli html", () => {
+  it("prints the page using today", () => {
+    const file = tmpFile();
+    run(["add", "buy", "milk"], file, DAY);
+    const res = run(["html"], file, DAY);
+    expect(res.code).toBe(0);
+    expect(res.out).toContain("<!doctype html>");
+    expect(res.out).toContain("buy milk");
+    expect(res.out).toContain('<div class="group">Today</div>');
+  });
+
+  it("never writes", () => {
+    const missing = tmpFile();
+    expect(run(["html"], missing, DAY).code).toBe(0);
+    expect(existsSync(missing)).toBe(false);
+    const file = tmpFile();
+    run(["add", "x"], file, DAY);
+    const before = readFileSync(file, "utf8");
+    run(["html"], file, DAY);
+    expect(readFileSync(file, "utf8")).toBe(before);
+  });
+
+  it("lists html in usage", () => {
+    expect(run(["fly"], tmpFile(), DAY).out).toContain("notes html");
   });
 });
