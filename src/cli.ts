@@ -1,12 +1,12 @@
-// notes add <text> | notes list | notes delete <id>. Run with: node src/cli.ts <command>
-import { addNote, deleteNote, formatList, loadNotes, localDate, NotesError, saveNotes } from "./notes.ts";
+// notes add <text> | notes list | notes search <text> | notes delete <id>. Run with: node src/cli.ts <command>
+import { addNote, deleteNote, formatList, loadNotes, localDate, NotesError, saveNotes, searchNotes } from "./notes.ts";
 
 export interface Result {
   code: number;
   out: string;
 }
 
-const USAGE = "usage: notes add <text> | notes list | notes delete <id>";
+const USAGE = "usage: notes add <text> | notes list | notes search <text> | notes delete <id>";
 
 export function run(argv: string[], file: string, today: string): Result {
   const [command, ...rest] = argv;
@@ -18,6 +18,10 @@ export function run(argv: string[], file: string, today: string): Result {
       return { code: 0, out: `Added note ${next[next.length - 1].id}.` };
     }
     if (command === "list") return { code: 0, out: formatList(notes) };
+    if (command === "search") {
+      const found = searchNotes(notes, rest.join(" "));
+      return { code: 0, out: found.length === 0 ? "No matching notes." : formatList(found) };
+    }
     if (command === "delete") {
       saveNotes(file, deleteNote(notes, Number(rest[0])));
       return { code: 0, out: `Deleted note ${rest[0]}.` };
