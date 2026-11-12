@@ -1,9 +1,9 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { run } from "../src/cli.ts";
-import { addNote, deleteNote, formatList, localDate, NotesError, searchNotes, type Note } from "../src/notes.ts";
+import { addNote, deleteNote, formatList, localDate, NotesError, renderHtml, searchNotes, type Note } from "../src/notes.ts";
 
 const DAY = "2026-11-06";
 const tmpFile = () => join(mkdtempSync(join(tmpdir(), "notes-")), "notes.json");
@@ -125,5 +125,91 @@ describe("cli search", () => {
     run(["add", "buy", "milk"], file, DAY);
     run(["search", "milk"], file, DAY);
     expect(run(["list"], file, DAY).out).toBe("1. buy milk (2026-11-06)");
+  });
+});
+
+describe("renderHtml", () => {
+  const two = addNote(addNote([], "first note", DAY), "second note", DAY);
+
+  it("is a complete page", () => {
+    const html = renderHtml(two);
+    expect(html).toContain("<!doctype html>");
+    expect(html).toContain('<meta charset="utf-8">');
+    expect(html).toContain('<meta name="viewport"');
+    expect(html).toContain("<title>Notas</title>");
+  });
+
+  it("renders each note in order with id and date", () => {
+    const html = renderHtml(two);
+    expect(html).toContain("#1");
+    expect(html).toContain("#2");
+    expect(html).toContain(DAY);
+    expect(html.indexOf("first note")).toBeGreaterThan(-1);
+    expect(html.indexOf("first note")).toBeLessThan(html.indexOf("second note"));
+    expect(html.match(/<article class="card">/g)).toHaveLength(2);
+  });
+
+  it("shows an empty state without cards", () => {
+    const html = renderHtml([]);
+    expect(html).toContain("No notes yet.");
+    expect(html).not.toContain("<article");
+  });
+
+  it("escapes note text", () => {
+    const html = renderHtml(addNote([], `<script>alert("x") & 'y'</script>`, DAY));
+    expect(html).toContain("&lt;script&gt;");
+    expect(html).toContain("&amp;");
+    expect(html).toContain("&quot;");
+    expect(html).toContain("&#39;");
+    expect(html).not.toContain("<script");
+  });
+
+  it("is self-contained with dark mode styles", () => {
+    const html = renderHtml(two);
+    expect(html).toContain("<style>");
+    expect(html).toContain("prefers-color-scheme: dark");
+    expect(html).not.toContain("<script");
+    expect(html).not.toContain("http://");
+    expect(html).not.toContain("https://");
+    expect(html).not.toContain("<link");
+  });
+
+  it("does not mutate its input", () => {
+    const copy = structuredClone(two);
+    renderHtml(two);
+    expect(two).toEqual(copy);
+  });
+});
+
+describe("cli html", () => {
+  it("prints the page with the notes", () => {
+    const file = tmpFile();
+    run(["add", "buy", "milk"], file, DAY);
+    const res = run(["html"], file, DAY);
+    expect(res.code).toBe(0);
+    expect(res.out.startsWith("<!doctype html>")).toBe(true);
+    expect(res.out).toContain("buy milk");
+  });
+
+  it("does not create a missing file", () => {
+    const file = tmpFile();
+    const res = run(["html"], file, DAY);
+    expect(res.code).toBe(0);
+    expect(res.out).toContain("No notes yet.");
+    expect(existsSync(file)).toBe(false);
+  });
+
+  it("leaves an existing file unchanged", () => {
+    const file = tmpFile();
+    run(["add", "x"], file, DAY);
+    const before = readFileSync(file, "utf8");
+    run(["html"], file, DAY);
+    expect(readFileSync(file, "utf8")).toBe(before);
+  });
+
+  it("lists html in the usage", () => {
+    const res = run(["fly"], tmpFile(), DAY);
+    expect(res.code).toBe(2);
+    expect(res.out).toContain("notes html");
   });
 });
