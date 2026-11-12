@@ -43,6 +43,14 @@ export function searchNotes(notes: Note[], query: string): Note[] {
   return notes.filter((n) => n.text.toLowerCase().includes(needle));
 }
 
+const gray = (s: string) => `\x1b[90m${s}\x1b[0m`;
+const green = (s: string) => `\x1b[32m${s}\x1b[0m`;
+
+export function formatListColor(notes: Note[]): string {
+  if (notes.length === 0) return "No notes yet.";
+  return notes.map((n) => `${gray(`${n.id}.`)} ${green(n.text)} (${n.created})`).join("\n");
+}
+
 export function formatList(notes: Note[]): string {
   if (notes.length === 0) return "No notes yet.";
   return notes.map((n) => `${n.id}. ${n.text} (${n.created})`).join("\n");

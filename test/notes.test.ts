@@ -1,9 +1,9 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { run } from "../src/cli.ts";
-import { addNote, deleteNote, formatList, localDate, NotesError, searchNotes, type Note } from "../src/notes.ts";
+import { addNote, deleteNote, formatList, formatListColor, localDate, NotesError, searchNotes, type Note } from "../src/notes.ts";
 
 const DAY = "2026-11-06";
 const tmpFile = () => join(mkdtempSync(join(tmpdir(), "notes-")), "notes.json");
@@ -125,5 +125,59 @@ describe("cli search", () => {
     run(["add", "buy", "milk"], file, DAY);
     run(["search", "milk"], file, DAY);
     expect(run(["list"], file, DAY).out).toBe("1. buy milk (2026-11-06)");
+  });
+});
+
+describe("formatListColor", () => {
+  const notes = addNote(addNote([], "milk", DAY), "eggs", DAY);
+  const strip = (s: string) => s.replace(/\x1b\[\d+m/g, "");
+
+  it("wraps id in gray and text in green", () => {
+    expect(formatListColor(notes)).toBe(
+      "\x1b[90m1.\x1b[0m \x1b[32mmilk\x1b[0m (2026-11-06)\n\x1b[90m2.\x1b[0m \x1b[32meggs\x1b[0m (2026-11-06)",
+    );
+  });
+
+  it("equals formatList once codes are stripped", () => {
+    expect(strip(formatListColor(notes))).toBe(formatList(notes));
+  });
+
+  it("keeps the empty message plain", () => {
+    expect(formatListColor([])).toBe("No notes yet.");
+  });
+
+  it("does not mutate the input", () => {
+    const copy = structuredClone(notes);
+    formatListColor(notes);
+    expect(notes).toEqual(copy);
+  });
+});
+
+describe("cli list color", () => {
+  it("is plain by default", () => {
+    const file = tmpFile();
+    run(["add", "milk"], file, DAY);
+    expect(run(["list"], file, DAY).out).not.toContain("\x1b");
+  });
+
+  it("is colored when color is on", () => {
+    const file = tmpFile();
+    run(["add", "milk"], file, DAY);
+    expect(run(["list"], file, DAY, true)).toEqual({
+      code: 0,
+      out: "\x1b[90m1.\x1b[0m \x1b[32mmilk\x1b[0m (2026-11-06)",
+    });
+  });
+
+  it("leaves search plain", () => {
+    const file = tmpFile();
+    run(["add", "x"], file, DAY);
+    expect(run(["search", "x"], file, DAY, true).out).toBe("1. x (2026-11-06)");
+  });
+
+  it("does not create the file when listing", () => {
+    const file = tmpFile();
+    run(["list"], file, DAY, true);
+    expect(existsSync(file)).toBe(false);
   });
 });

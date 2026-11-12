@@ -1,5 +1,5 @@
 // notes add <text> | notes list | notes search <text> | notes delete <id>. Run with: node src/cli.ts <command>
-import { addNote, deleteNote, formatList, loadNotes, localDate, NotesError, saveNotes, searchNotes } from "./notes.ts";
+import { addNote, deleteNote, formatList, formatListColor, loadNotes, localDate, NotesError, saveNotes, searchNotes } from "./notes.ts";
 
 export interface Result {
   code: number;
@@ -8,7 +8,7 @@ export interface Result {
 
 const USAGE = "usage: notes add <text> | notes list | notes search <text> | notes delete <id>";
 
-export function run(argv: string[], file: string, today: string): Result {
+export function run(argv: string[], file: string, today: string, color = false): Result {
   const [command, ...rest] = argv;
   try {
     const notes = loadNotes(file);
@@ -17,7 +17,7 @@ export function run(argv: string[], file: string, today: string): Result {
       saveNotes(file, next);
       return { code: 0, out: `Added note ${next[next.length - 1].id}.` };
     }
-    if (command === "list") return { code: 0, out: formatList(notes) };
+    if (command === "list") return { code: 0, out: color ? formatListColor(notes) : formatList(notes) };
     if (command === "search") {
       const found = searchNotes(notes, rest.join(" "));
       return { code: 0, out: found.length === 0 ? "No matching notes." : formatList(found) };
@@ -34,7 +34,8 @@ export function run(argv: string[], file: string, today: string): Result {
 }
 
 if (import.meta.main) {
-  const result = run(process.argv.slice(2), process.env.NOTES_FILE ?? "notes.json", localDate(new Date()));
+  const color = Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
+  const result = run(process.argv.slice(2), process.env.NOTES_FILE ?? "notes.json", localDate(new Date()), color);
   console.log(result.out);
   process.exitCode = result.code;
 }
