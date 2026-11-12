@@ -37,6 +37,13 @@ export function deleteNote(notes: Note[], id: number): Note[] {
   return notes.filter((n) => n.id !== id);
 }
 
+export function editNote(notes: Note[], id: number, text: string): Note[] {
+  const clean = text.trim();
+  if (!clean) throw new NotesError("a note needs some text");
+  if (!notes.some((n) => n.id === id)) throw new NotesError(`no note with id ${id}`);
+  return notes.map((n) => (n.id === id ? { ...n, text: clean } : n));
+}
+
 export function searchNotes(notes: Note[], query: string): Note[] {
   const needle = query.trim().toLowerCase();
   if (!needle) throw new NotesError("search needs some text");
