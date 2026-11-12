@@ -43,6 +43,18 @@ export function searchNotes(notes: Note[], query: string): Note[] {
   return notes.filter((n) => n.text.toLowerCase().includes(needle));
 }
 
+function isRealDate(date: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+  const [y, m, d] = date.split("-").map(Number);
+  const check = new Date(Date.UTC(y, m - 1, d));
+  return check.getUTCFullYear() === y && check.getUTCMonth() === m - 1 && check.getUTCDate() === d;
+}
+
+export function notesSince(notes: Note[], date: string): Note[] {
+  if (!isRealDate(date)) throw new NotesError("--since needs a date like YYYY-MM-DD");
+  return notes.filter((n) => n.created >= date);
+}
+
 export function formatList(notes: Note[]): string {
   if (notes.length === 0) return "No notes yet.";
   return notes.map((n) => `${n.id}. ${n.text} (${n.created})`).join("\n");
